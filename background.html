@@ -1,0 +1,64 @@
+<html>
+	<head>
+		<script>
+			// prepare database
+			function prepareDatabase() {
+				var db = openDatabase('netflixdb', '1.0', 'netflix request db', 5*1024*1024);
+				db.transaction(function (tx) {
+					tx.executeSql('DROP TABLE IF EXISTS reqtable');
+					tx.executeSql('CREATE TABLE reqtable (reqid, url, ip, reqtime, responsetime, PRIMARY KEY(reqid))');
+				});
+				return db;
+			}
+
+			// Called when the url of a tab changes.
+			function checkForNetflixUrl(tabId, changeInfo, tab) {
+				// If netflix.com is found in the tab's URL...
+				if (tab.url.indexOf("netflix.com") > -1) {
+					// show the netflix action on that tab.
+					chrome.pageAction.show(tabId);
+					var db = prepareDatabase();
+					addListenerToNetflixTab(tabId, db);
+				}
+			};
+			function addListenerToNetflixTab(tabId, db){
+				//create data entry when request is sent
+				chrome.experimental.webRequest.onBeforeRequest.addListener(
+					function(details){
+						if(details.url.indexOf("range") > -1){
+							//report the url and the token to the server
+							var xhr = new XMLHttpRequest();
+							xhr.open("GET", "http://172.24.74.100/~huangty/netflix/addtokens.php?url=" + details.url, true);
+							xhr.send();
+							//report to local storage
+							db.transaction(function (tx) {
+								tx.executeSql('SELECT * FROM reqtable WHERE reqid=?', [details.requestId], function (tx, results) {
+									var len = results.rows.length
+									if( len == 0){
+										tx.executeSql('INSERT INTO reqtable (reqid, url, ip, reqtime, responsetime) VALUES (?,?,?,?,?)', [details.requestId, details.url, null, details.timeStamp.toString(), null]);
+									}
+								});
+							});
+						}
+					},
+					{"tabId":tabId},
+					[]
+				);
+				//store data when response is completed
+				chrome.experimental.webRequest.onResponseStarted.addListener(
+					function(details){
+						console.log("response:"+details.url);
+						db.transaction(function (tx) {
+							tx.executeSql('UPDATE reqtable SET ip=?, responsetime=? WHERE reqid=?', [details.ip, details.timeStamp.toString(), details.requestId]);
+						});
+                    },
+                    {"tabId":tabId},
+                    []
+				);
+			}
+			// Listen for any changes to the URL of any tab.
+			chrome.tabs.onUpdated.addListener(checkForNetflixUrl);
+
+		</script>
+	</head>
+</html>

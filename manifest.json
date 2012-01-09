@@ -1,0 +1,19 @@
+{
+  "name": "Netflix Token Reporter",
+  "version": "0.1",
+  "description": "The token reporter of the netflix movies",
+  "background_page" : "background.html",
+  "page_action" :
+  {
+    "default_icon" : "netflix.png",
+    "default_title" : "click to see the request log",
+	"default_popup": "popup.html"
+  },
+  "permissions":  [
+	"experimental",
+    "notifications",
+    "tabs",
+    "http://*/*",
+    "https://*/*"
+  ]
+}

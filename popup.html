@@ -1,0 +1,109 @@
+<html>
+<head>
+<style type="text/css">
+tr.d0 td {
+	background-color: #FCF6CF; color: black;
+}
+tr.d1 td {
+	background-color: #FEFEF2; color: black;
+}
+body {
+	width: 700px;
+}
+
+</style>
+
+</head>
+<body>
+<TABLE id="requestTable" border="1">
+		<TR>
+			<TH>ID</TH>
+			<TH>Server IP</TH>
+			<TH>Request</TH>
+			<TH>Req time</TH>
+			<TH>Response time</TH>
+		</TR>
+</TABLE>
+<script type="text/javascript">
+var table = document.getElementById("requestTable");
+var read_row = 0;
+window.onload=toBottom;
+
+function toBottom()
+{
+	window.scrollTo(0, document.body.scrollHeight);
+}
+
+var db = openDatabase('netflixdb', '1.0', 'netflix request db', 5*1024*1024);
+var last_complete_row = 0
+function readDatabase(){
+	var table_size = table.rows.length;
+	var firstRowNeedUpdate = table.rows.length;
+	if(0){
+		for(var i = (table.rows.length - 1); i>=last_complete_row; i--)
+		{
+			var row = table.rows[i];
+			console.log(row.cells[1].childNodes[0])
+			if(row.cells[1].childNodes[0] == ""){
+				firstRowNeedUpdate = i;
+				table.deleteRow(i);
+				console.log("clean up the table for row " + i)
+			}else{
+				last_complete_row = i
+			}
+		}
+	}
+	/*if(table_size > 3){
+		table.deleteRow(table.rows.length-1);
+		table.deleteRow(table.rows.length-2);
+		table.deleteRow(table.rows.length-3);
+		table_size = table_size -3
+	}*/
+    //console.log("#1: row # to update: " + firstRowNeedUpdate + "number of rows: " + table.rows.length)
+
+	db.transaction(function (tx) {
+		tx.executeSql('SELECT * FROM reqtable ORDER BY reqid ASC', [], function (tx, results) {
+		  var len = results.rows.length, i;
+		  //console.log("#2: row # to update: " + firstRowNeedUpdate + "number of rows: " + table.rows.length)
+		  for (i = (table.rows.length-1); i < len; i++) {
+		  	console.log("Enter the insert loop");
+			var lastRow = table.rows.length;
+			var row = table.insertRow(lastRow);
+			if( i % 2 !=0){
+				row.className="d1";
+			}else{
+				row.className="d0";
+			}
+					
+			var cell0=row.insertCell(0);
+			var cell1=row.insertCell(1);
+			var cell2=row.insertCell(2);
+			var cell3=row.insertCell(3);
+			var cell4=row.insertCell(4);
+			cell0.innerHTML = results.rows.item(i).reqid;
+			if( results.rows.item(i).ip == null){
+				cell1.innerHTML == "";
+				console.log("ip - " + results.rows.item(i).ip )
+			}else{
+				cell1.innerHTML = results.rows.item(i).ip;
+			}
+			cell2.innerHTML = results.rows.item(i).url;
+			cell3.innerHTML = results.rows.item(i).reqtime;
+			cell4.innerHTML = results.rows.item(i).responsetime;
+		  }
+		});
+	});
+}
+
+chrome.experimental.webRequest.onBeforeRequest.addListener(
+	function(details){
+		readDatabase();
+	},
+	{},
+	[]
+);
+
+</script>
+</body>
+</html>
+
