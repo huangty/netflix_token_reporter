@@ -28,7 +28,8 @@
 						if(details.url.indexOf("range") > -1){
 							//report the url and the token to the server
 							var xhr = new XMLHttpRequest();
-							xhr.open("GET", "http://172.24.74.100/~huangty/netflix/addtokens.php?url=" + escape(details.url) + "&taburl=" + escape(tabUrl), true);
+							//xhr.open("GET", "http://172.24.74.100/~huangty/netflix/addtokens.php?url=" + escape(details.url) + "&taburl=" + escape(tabUrl), true);
+							xhr.open("GET", "http://172.24.74.100/~huangty/netflix/addtokens.php?url=" + escape(details.url), true);
 							xhr.send();
 							//report to local storage
 							db.transaction(function (tx) {
