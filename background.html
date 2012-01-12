@@ -14,7 +14,7 @@
 			// Called when the url of a tab changes.
 			function checkForNetflixUrl(tabId, changeInfo, tab) {
 				// If netflix.com is found in the tab's URL...
-				if (tab.url.indexOf("netflix.com") > -1) {
+				if (tab.url.indexOf("netflix.com/WiPlayer") > -1) {
 					// show the netflix action on that tab.
 					chrome.pageAction.show(tabId);
 					var db = prepareDatabase();
