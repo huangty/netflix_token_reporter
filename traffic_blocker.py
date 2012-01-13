@@ -23,7 +23,27 @@ class DatabaseHandler:
         self.conn = MySQLdb.connect(host='localhost', db='netflix_movie_token', user='huangty', passwd='ofwork')
         self.cursor = self.conn.cursor(cursorclass=SSCursor)
 
-    def get_ip(self):
+    def get_lastest_ip(self):
+        sql_query = 'SELECT hostname from token_table ORDER BY timestamp DESC LIMIT 5'
+        self.cursor.execute(sql_query)
+        hosts = self.cursor.fetchall()
+        if not hosts:
+            return
+        sql_query = 'SELECT DISTINCT ip from host_table WHERE '
+        initial = 0;
+        for host in hosts:
+            if ( initial == 0 ):
+                sql_query = sql_query + " hostname='" + host[0] + "'"
+            else:
+                sql_query = sql_query + " OR hostname='" + host[0] + "'"
+            initial = 1
+	
+        print sql_query
+        self.cursor.execute(sql_query)
+        return self.cursor
+
+	
+    def get_allip(self):
         sql_query = 'SELECT DISTINCT ip from host_table'
         self.cursor.execute(sql_query)
         return self.cursor
@@ -61,7 +81,7 @@ class TrafficShaper:
     def setupTC(self):
         self.cmdq.append(TC + " qdisc add dev " + IF + " root handle 1: htb default 30")
         self.cmdq.append(TC + " class add dev " + IF + " parent 1: classid 1:1 htb rate " + TROTTLE_RATE)
-        cursor = self.db.get_ip()
+        cursor = self.db.get_lastest_ip()
 
         try:
             rows = cursor.fetchall()
