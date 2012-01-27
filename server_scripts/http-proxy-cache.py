@@ -37,6 +37,7 @@ import ftplib
  
 DEFAULT_LOG_FILENAME = "proxy.log"
 CACHE_PATH = "/home/huangty/Research/netflix/setup/proxy/cache/"
+SERVE_FROM_CACHE = True
  
 class ProxyHandler (BaseHTTPServer.BaseHTTPRequestHandler):
     __base = BaseHTTPServer.BaseHTTPRequestHandler
@@ -83,6 +84,35 @@ class ProxyHandler (BaseHTTPServer.BaseHTTPRequestHandler):
             soc.close()
             self.connection.close()
  
+    def is_netflix_data_request(self, path, server, url):
+        is_netflix = False
+        print "path=%s, server=%s, url=%s" % (path, server, url)
+        if  ("/range/" in path) and (("edgesuite.net" in server) or ("llnwd.net" in server) or ("lcdn.nflximg.com" in server) ):            
+            is_netflix = True
+            import httplib
+            conn = httplib.HTTPConnection(server)
+            conn.request("HEAD", url)
+            http_header = conn.getresponse()
+            file_size = float(http_header.getheader('content-length'))
+            if( file_size == 0): #not a data traffic
+                is_netflix = False
+                return(is_netflix, [], 0, 0, [])
+            
+            #if( "referer" in self.headers and ("movies.netflix.com" in self.headers['referer'])):
+            filename = path.split("/range/")[0].split("/")
+            #print filename[len(filename)-1] 
+            file_range = path.split("/range/")[1].split("-")
+            if( len(file_range) >= 2 ):
+                request_range_start = file_range[0]
+                request_range_end = file_range[1]
+                if(request_range_end == ''):
+                    request_range_end = file_size
+            return (is_netflix, filename[len(filename)-1], request_range_start, request_range_end, http_header)
+        else:
+            return(is_netflix, [], 0, 0, [])
+
+
+
     def do_GET(self):
         (scm, netloc, path, params, query, fragment) = urlparse.urlparse(
             self.path, 'http')
@@ -94,34 +124,66 @@ class ProxyHandler (BaseHTTPServer.BaseHTTPRequestHandler):
             if scm == 'http':                
                 if self._connect_to(netloc, soc):
                     self.log_request()
-                    soc.send("%s %s %s\r\n" % (self.command,
-                                               urlparse.urlunparse(('', '', path,
-                                                                    params, query,
-                                                                    '')),
-                                               self.request_version))
-                    #print "SEND: %s path=%s netloc=%s %s \r \n" % (self.command, path, netloc, self.request_version)
-                    #print "HEADER SEND\n"
-                    self.headers['Connection'] = 'close'
-                    del self.headers['Proxy-Connection']            
-                    for key_val in self.headers.items():
-                        soc.send("%s: %s\r\n" % key_val)
-                        #print "%s: %s\r\n" % key_val
-                    soc.send("\r\n")
-                    netloc = str(netloc)
-                    print "netloc = %s isnetflix = %s" % (str(netloc), "edgesuite.net" in netloc)
-                    if  ("/range/" in path) and (("edgesuite.net" in netloc) or ("llnwd.net" in netloc) or ("lcdn.nflximg.com" in netloc) ):
-                        #if( "referer" in self.headers and ("movies.netflix.com" in self.headers['referer'])):
-                        filename = path.split("/range/")[0].split("/")
-                        #print filename[len(filename)-1] 
-                        file_range = path.split("/range/")[1].split("-")
-                        if( len(file_range) > 1):
-                            print "\r\n NETFLIX MOVIE TRAFFIC !!! \r\n Range = %s - %s" % (file_range[0], file_range[1])
-                            self._read_write_cache(soc, int(file_range[0]), int(file_range[1]), filename[len(filename)-1])                        
+                    url = urlparse.urlunparse(('', '', path, params, query,''))
+                    print ("COMMAND: %s path=%s netloc=%s url=%s \r \n" % (self.command, path, netloc, url))
+                    (is_netflix_data_traffic, filename, request_range_start, request_range_end, http_header) = self.is_netflix_data_request(path, netloc, url)
+                    #print ("Netflix Traffic?: %s, Request File: %s, Range=%s-%s, HEADER=%s"
+                    #                %(is_netflix_data_traffic, filename, request_range_start, request_range_end, http_header))
+                    
+                    if( is_netflix_data_traffic and SERVE_FROM_CACHE == True):
+                        if(os.path.exists(CACHE_PATH+filename) and ( int(request_range_end) <= os.path.getsize(CACHE_PATH+filename) ) ):
+                            print "SERVE Header from Head request abd Serve data from the cache for file %s" % filename
+                            start = int(request_range_start)
+                            end = int(request_range_end)
+                            soc.send("%s %s %s\r\n" % ("HEAD", url, self.request_version))
+                            self.headers['Connection'] = 'close'
+                            del self.headers['Proxy-Connection']            
+                            for key_val in self.headers.items():
+                                soc.send("%s: %s\r\n" % key_val)
+                                #print "%s: %s\r\n" % key_val
+                            soc.send("\r\n")
+                            #print "\n\nReceived HEAD from HEAD Request:\n\n"
+                            #print "%s" % http_header.msg
+                            self._read_write_cache(soc, start, end, filename)                    
+                            
+                            #header = "HTTP/1.1 200 OK\r\n%s" % http_header.msg
+                            #print header
+                            #self.connection.send(header)
+                            #f = open(CACHE_PATH+filename, "r")
+                            #f.seek(start)
+                            #video = f.read(end-start+1)
+                            #f.close()
+                            #self.connection.send(video)
                         else:
-                            #todo, handle open-ended traffic
-                            self._read_write(soc)
+                            print "ERROR"
                     else:
+                        print "Serve From Normal Proxy";
+                        soc.send("%s %s %s\r\n" % (self.command,
+                                                   urlparse.urlunparse(('', '', path,
+                                                                        params, query,
+                                                                        '')),
+                                                   self.request_version))
+                        self.headers['Connection'] = 'close'
+                        del self.headers['Proxy-Connection']            
+                        for key_val in self.headers.items():
+                            soc.send("%s: %s\r\n" % key_val)
+                            #print "%s: %s\r\n" % key_val
+                        soc.send("\r\n")
                         self._read_write(soc)
+                        if 0:
+                            if  ("/range/" in path) and (("edgesuite.net" in netloc) or ("llnwd.net" in netloc) or ("lcdn.nflximg.com" in netloc) ):
+                                #if( "referer" in self.headers and ("movies.netflix.com" in self.headers['referer'])):
+                                filename = path.split("/range/")[0].split("/")
+                                #print filename[len(filename)-1] 
+                                file_range = path.split("/range/")[1].split("-")
+                                if( len(file_range) >= 2 and file_range[1]!='' ):
+                                    print "\r\n NETFLIX MOVIE TRAFFIC !!! \r\n Range = %s - %s" % (file_range[0], file_range[1])
+                                    self._read_write_cache(soc, int(file_range[0]), int(file_range[1]), filename[len(filename)-1])                        
+                                else:
+                                    #todo, handle open-ended traffic
+                                    self._read_write(soc)
+                            else:
+                                self._read_write(soc)
             elif scm == 'ftp':
                 # fish out user and password information
                 i = netloc.find ('@')
@@ -188,6 +250,52 @@ class ProxyHandler (BaseHTTPServer.BaseHTTPRequestHandler):
                             local_data += data
                         elif out is soc: 
                             out.send(data)
+                        else:
+                            print filename
+                            if(os.path.exists(CACHE_PATH+filename)):
+                                http_data += data                                
+                                if ("\r\n\r\n" in http_data): 
+                                    print "SERVE from the cache for file %s" % filename
+                                    http_header = http_data.split("\r\n\r\n")
+                                    print http_header[0]
+                                    #print http_header[1]                                           
+                                    f = open(CACHE_PATH+filename, "r")
+                                    f.seek(start)
+                                    replacement = f.read(end-start+1)
+                                    f.close()
+                                    #print replacement 
+                                    out.send(http_header[0]+"\r\n\r\n"+replacement)
+                                    http_data = ""
+                            else:
+                                out.send(http_data)
+                        count = 0
+            if count == max_idling: break
+        if local: return local_data
+        return None
+
+
+    def _read_write_cache_all(self, soc, start, end, filename, max_idling=20, local=False):
+        iw = [self.connection, soc]
+        local_data = ""
+        http_data = ""
+        ow = []
+        count = 0
+        while 1:
+            count += 1
+            (ins, _, exs) = select.select(iw, ow, iw, 1)
+            if exs: break
+            if ins:
+                for i in ins:
+                    if i is soc: #if input is server, then output is client
+                        out = self.connection                         
+                    else: 
+                        out = soc #if input is client, then output is server
+                    data = i.recv(8192)
+                    if data:
+                        if local: 
+                            local_data += data
+                        elif out is soc: 
+                            out.send(data)
                         elif not "ismv" in filename:
                             out.send(data)
                         else:
@@ -197,7 +305,7 @@ class ProxyHandler (BaseHTTPServer.BaseHTTPRequestHandler):
                                 if ("\r\n\r\n" in http_data): 
                                     print "SERVE from the cache for file %s" % filename
                                     http_header = http_data.split("\r\n\r\n")
-                                    #print http_header[0]
+                                    print http_header[0]
                                     #print http_header[1]       
                                     f = open(CACHE_PATH+filename, "r")
                                     f.seek(start)
