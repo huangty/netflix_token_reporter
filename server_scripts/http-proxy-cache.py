@@ -38,7 +38,7 @@ import ftplib
 DEFAULT_LOG_FILENAME = "proxy.log"
 CACHE_PATH = "/home/huangty/Research/netflix/setup/proxy/cache/"
 SERVE_FROM_CACHE = True
-SPLIT_REQUEST = False
+SPLIT_REQUEST = True
  
 class ProxyHandler (BaseHTTPServer.BaseHTTPRequestHandler):
     __base = BaseHTTPServer.BaseHTTPRequestHandler
@@ -112,6 +112,16 @@ class ProxyHandler (BaseHTTPServer.BaseHTTPRequestHandler):
         else:
             return(is_netflix, [], 0, 0, [])
 
+    def normal_proxy_relay(self, http_command, url, request_version, headers, soc):
+        print "Serve From Normal Proxy";
+        soc.send("%s %s %s\r\n" % (http_command, url, request_version))
+        headers['Connection'] = 'close'
+        del headers['Proxy-Connection']            
+        for key_val in headers.items():
+            soc.send("%s: %s\r\n" % key_val)
+            #print "%s: %s\r\n" % key_val
+        soc.send("\r\n")
+        self._read_write(soc)
 
 
     def do_GET(self):
@@ -145,21 +155,10 @@ class ProxyHandler (BaseHTTPServer.BaseHTTPRequestHandler):
                             f.close()
                             self.connection.send(video)
                         else:
-                            print "ERROR"
+                            print "No Cache Exist, Serve from Proxy"
+                            self.normal_proxy_relay(self.command, url, self.request_version, self.headers, soc)
                     else:
-                        print "Serve From Normal Proxy";
-                        soc.send("%s %s %s\r\n" % (self.command,
-                                                   urlparse.urlunparse(('', '', path,
-                                                                        params, query,
-                                                                        '')),
-                                                   self.request_version))
-                        self.headers['Connection'] = 'close'
-                        del self.headers['Proxy-Connection']            
-                        for key_val in self.headers.items():
-                            soc.send("%s: %s\r\n" % key_val)
-                            #print "%s: %s\r\n" % key_val
-                        soc.send("\r\n")
-                        self._read_write(soc)
+                        self.normal_proxy_relay(self.command, url, self.request_version, self.headers, soc)
             elif scm == 'ftp':
                 # fish out user and password information
                 i = netloc.find ('@')
