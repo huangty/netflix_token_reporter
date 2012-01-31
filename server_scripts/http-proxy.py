@@ -40,8 +40,10 @@ from MySQLdb.cursors import SSCursor
  
 DEFAULT_LOG_FILENAME = "proxy.log"
 CACHE_PATH = "/home/huangty/Research/netflix/setup/proxy/cache/"
-SERVE_FROM_CACHE = False
-SPLIT_REQUEST = True
+HOST_IP = "172.24.74.100"
+SERVE_FROM_CACHE = True
+OFFLINE_VIEW = True
+SPLIT_REQUEST = False
 
 class DatabaseHandler:
     def __init__(self, *args, **kw):
@@ -68,7 +70,26 @@ class DatabaseHandler:
         except:
             traceback.print_exc()
         return (urls, servers)
-
+    
+    def add_etag(self, filename, etag, server):
+        sql_query = 'UPDATE token_table SET etag=\'%s\' WHERE filename=\'%s\' and hostname=\'%s\'' % (etag, filename, server)
+        self.cursor.execute(sql_query)
+        return self.cursor
+    
+    def get_etag(self, filename):
+        sql_query = 'SELECT etag from token_table WHERE filename=\''+filename+'\' ORDER BY timestamp DESC Limit 1'
+        self.cursor.execute(sql_query)
+        etag = ''
+        try:
+            rows = self.cursor.fetchall()
+            if not rows:
+                return
+            for tag in rows:
+                etag = tag
+        except:
+            traceback.print_exc()
+        return etag
+        
     def close(self):
         self.cursor.close()
         self.conn.close()
@@ -106,6 +127,7 @@ class ProxyHandler (BaseHTTPServer.BaseHTTPRequestHandler):
         return 1
  
     def do_CONNECT(self):
+        print "doing do_CONNECT"
         soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             if self._connect_to(self.path, soc):
@@ -123,7 +145,7 @@ class ProxyHandler (BaseHTTPServer.BaseHTTPRequestHandler):
         import httplib
         conn = httplib.HTTPConnection(server)
         conn.putrequest(command, url)
-        conn.putheader("Host", "172.24.74.100")
+        conn.putheader("Host", HOST_IP)
         conn.putheader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_5_8) AppleWebKit/535.7 (KHTML, like Gecko) Chrome/16.0.912.77 Safari/535.7")
         conn.putheader("Accept", "*/*")
         conn.putheader("Accept-Encoding", "gzip,deflate,sdch")
@@ -132,6 +154,21 @@ class ProxyHandler (BaseHTTPServer.BaseHTTPRequestHandler):
         conn.putheader("Connection", "close")
         conn.endheaders()
         return conn.getresponse()
+    
+    def forge_http_header(self, filename, server, request_bytes, etag):
+        headerq = []
+        headerq.append("Server: Apache")
+        headerq.append("ETag: %s" % etag)
+        headerq.append("Last-Modified: Sat, 07 May 2011 07:52:22 GMT")
+        headerq.append("Accept-Ranges: bytes")
+        headerq.append("Content-Length: %s" % request_bytes)
+        headerq.append("Content-Type: text/plain")
+        import time
+        headerq.append(self.date_time_string(time.time()))
+        headerq.append("Connection: close")
+        headerq.append("Cache-Control: no-store")
+        
+        return "\r\n".join(headerq)+"\r\n"
 
 
     def is_netflix_data_request(self, path, server, url):
@@ -139,22 +176,47 @@ class ProxyHandler (BaseHTTPServer.BaseHTTPRequestHandler):
         print "path=%s, server=%s, url=%s" % (path, server, url)
         if  ("/range/" in path) and (("edgesuite.net" in server) or ("llnwd.net" in server) or ("lcdn.nflximg.com" in server) ):            
             is_netflix = True
-            http_header = self.send_http_request(server, "HEAD", url)
-            file_size = float(http_header.getheader('content-length'))
-            if( file_size == 0): #not a data traffic
-                is_netflix = False
-                return(is_netflix, [], 0, 0, [])
-            
-            #if( "referer" in self.headers and ("movies.netflix.com" in self.headers['referer'])):
+            is_header_forgable = True
+            request_range_start = ''
+            request_range_end = ''
             filename = path.split("/range/")[0].split("/")
-            #print filename[len(filename)-1] 
             file_range = path.split("/range/")[1].split("-")
             if( len(file_range) >= 2 ):
                 request_range_start = file_range[0]
                 request_range_end = file_range[1]
+            if(request_range_end == ''):
+                is_header_forgable = False
+                        
+            if(is_header_forgable == True):
+                etag = db.get_etag(filename[len(filename)-1])
+                if(etag == ''):
+                    is_header_forgable = False
+            if(OFFLINE_VIEW == True and is_header_forgable == True):
+                print "Forging the header... \n"                
+                request_bytes = int(request_range_end) - int(request_range_start) + 1
+                http_header_fake = self.forge_http_header(filename[len(filename)-1], server, request_bytes, etag)
+                #print "\n=============================\n"
+                #print "\n Forged HTTP Header\n"
+                #print "\n=============================\n"
+                #print http_header_fake
+                #print "\n=============================\n"
+                return (is_netflix, filename[len(filename)-1], request_range_start, request_range_end, http_header_fake)
+            else:
+                print "Get Header from server, url: %s" % url
+                http_header = self.send_http_request(server, "HEAD", url)
+                file_size = float(http_header.getheader('content-length'))
+                etag = http_header.getheader('Etag')
+                if( file_size == 0): #not a data traffic
+                    is_netflix = False
+                    return(is_netflix, [], 0, 0, [])
+                
+                #if( "referer" in self.headers and ("movies.netflix.com" in self.headers['referer'])):
+                #print "filename:%s, etag:%s, hostname:%s" % (filename[len(filename)-1], etag, server)
+                if(etag != ""):
+                    db.add_etag(filename[len(filename)-1], etag, server)
                 if(request_range_end == ''):
                     request_range_end = file_size
-            return (is_netflix, filename[len(filename)-1], request_range_start, request_range_end, http_header)
+                return (is_netflix, filename[len(filename)-1], request_range_start, request_range_end, http_header.msg)
         else:
             return(is_netflix, [], 0, 0, [])
 
@@ -180,57 +242,59 @@ class ProxyHandler (BaseHTTPServer.BaseHTTPRequestHandler):
         soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             if scm == 'http':                
-                if self._connect_to(netloc, soc):
-                    self.log_request()
-                    url = urlparse.urlunparse(('', '', path, params, query,''))
-                    print ("COMMAND: %s path=%s netloc=%s url=%s \r \n" % (self.command, path, netloc, url))
-                    (is_netflix_data_traffic, filename, request_range_start, request_range_end, http_header) = self.is_netflix_data_request(path, netloc, url)
-                    #print ("Netflix Traffic?: %s, Request File: %s, Range=%s-%s, HEADER=%s"
-                    #                %(is_netflix_data_traffic, filename, request_range_start, request_range_end, http_header))
-                    
-                    if( is_netflix_data_traffic and SERVE_FROM_CACHE == True):
-                        if(os.path.exists(CACHE_PATH+filename) and ( int(request_range_end) <= os.path.getsize(CACHE_PATH+filename) ) ):
-                            print "SERVE Header from Head request abd Serve data from the cache for file %s" % filename
-                            start = int(request_range_start)
-                            end = int(request_range_end)
-                            header = "HTTP/1.1 200 OK\r\nHTTP/1.1 200 OK\r\n%s\r\n" % http_header.msg
-                            #print header
-                            self.connection.send(header)
-                            f = open(CACHE_PATH+filename, "r")
-                            f.seek(start)
-                            video = f.read(end-start+1)
-                            f.close()
-                            self.connection.send(video)
-                        else:
-                            print "No Cache Exist, Serve from Proxy"
-                            self.normal_proxy_relay(self.command, url, self.request_version, self.headers, soc)
-                    elif( is_netflix_data_traffic and SPLIT_REQUEST == True):
-                        #print "Request from %s, Token available at %s"
-                        urls,servers = db.get_available_tokens(filename)
+                url = urlparse.urlunparse(('', '', path, params, query,''))
+                print ("COMMAND: %s path=%s netloc=%s url=%s \r \n" % (self.command, path, netloc, url))
+                (is_netflix_data_traffic, filename, request_range_start, request_range_end, http_header) = self.is_netflix_data_request(path, netloc, url)
+                #print ("Netflix Traffic?: %s, Request File: %s, Range=%s-%s, HEADER=%s"
+                #                %(is_netflix_data_traffic, filename, request_range_start, request_range_end, http_header))
+                
+                if( is_netflix_data_traffic and SERVE_FROM_CACHE == True):
+                    if(os.path.exists(CACHE_PATH+filename) and ( int(request_range_end) <= os.path.getsize(CACHE_PATH+filename) ) ):
+                        print "SERVE Header from Head request abd Serve data from the cache for file %s" % filename
                         start = int(request_range_start)
-                        end = int(request_range_end)
-                        num_split = len(urls)
-                        #print "start: %s, end: %s, split into %s" % (start, end, num_split)
-                        url_start = start
-                        i = 1
-                        video = ""
-                        for base_url, token in urls.items():                            
-                            if ( i == num_split ):
-                                url_end = end
-                            else:
-                                url_end = url_start + int((end-start+1) / num_split)                            
-                            i += 1
-                            split_url = base_url + "range/%s-%s?" % (url_start, url_end) + token
-                            url_start = url_end + 1
-                            print split_url
-                            http_response = self.send_http_request(servers[base_url], "GET", split_url)
-                            video += http_response.read()
-                        #print video
-                        header = "HTTP/1.1 200 OK\r\nHTTP/1.1 200 OK\r\n%s\r\n" % http_header.msg
+                        end = int(request_range_end)                            
+                        header = "HTTP/1.1 200 OK\r\nHTTP/1.1 200 OK\r\n%s\r\n" % http_header
+                        #print header
                         self.connection.send(header)
+                        f = open(CACHE_PATH+filename, "r")
+                        f.seek(start)
+                        video = f.read(end-start+1)
+                        f.close()
                         self.connection.send(video)
-                        #self.normal_proxy_relay(self.command, url, self.request_version, self.headers, soc)
                     else:
+                        print "No Cache Exist, Serve from Proxy"
+                        if self._connect_to(netloc, soc):
+                            self.log_request()
+                            self.normal_proxy_relay(self.command, url, self.request_version, self.headers, soc)
+                elif( is_netflix_data_traffic and SPLIT_REQUEST == True):
+                    #print "Request from %s, Token available at %s"
+                    urls,servers = db.get_available_tokens(filename)
+                    start = int(request_range_start)
+                    end = int(request_range_end)
+                    num_split = len(urls)
+                    #print "start: %s, end: %s, split into %s" % (start, end, num_split)
+                    url_start = start
+                    i = 1
+                    video = ""
+                    for base_url, token in urls.items():                            
+                        if ( i == num_split ):
+                            url_end = end
+                        else:
+                            url_end = url_start + int((end-start+1) / num_split)                            
+                        i += 1
+                        split_url = base_url + "range/%s-%s?" % (url_start, url_end) + token
+                        url_start = url_end + 1
+                        print split_url
+                        http_response = self.send_http_request(servers[base_url], "GET", split_url)
+                        video += http_response.read()
+                    #print video
+                    header = "HTTP/1.1 200 OK\r\nHTTP/1.1 200 OK\r\n%s\r\n" % http_header.msg
+                    self.connection.send(header)
+                    self.connection.send(video)
+                    #self.normal_proxy_relay(self.command, url, self.request_version, self.headers, soc)
+                else:
+                    if self._connect_to(netloc, soc):
+                        self.log_request()
                         self.normal_proxy_relay(self.command, url, self.request_version, self.headers, soc)
             elif scm == 'ftp':
                 # fish out user and password information
@@ -411,7 +475,7 @@ def main ():
         logger.log (logging.INFO, "Any clients will be served...")
  
     #server_address = (socket.gethostbyname (local_hostname), port)
-    server_address = ( "172.24.74.100", port)
+    server_address = ( "%s" % HOST_IP , port)
     ProxyHandler.protocol = "HTTP/1.0"
     httpd = ThreadingHTTPServer (server_address, ProxyHandler, logger)
     sa = httpd.socket.getsockname ()
