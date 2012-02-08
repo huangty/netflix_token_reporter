@@ -1,6 +1,6 @@
 {
   "name": "Netflix Token Reporter",
-  "version": "0.1",
+  "version": "0.2",
   "description": "The token reporter of the netflix movies",
   "background_page" : "background.html",
   "page_action" :
