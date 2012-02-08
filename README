@@ -2,25 +2,22 @@ chrome extension for netflix request
 
 Mac OS
 =====
-1. enable experiments API:
-Go to "chrome://flags", enable "Experimental Extension APIs"
+1. Since Chrome 17, the webRequest API has been moved to stable, so no more experimental api flag is needed, just run chrome normally would be fine
+"/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome"
 
-2. restart chrome with specific parameters (close all existing Chrome instances first):
-"/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --enable-experimental-extension-apis"
-
-3. download the extension in chrome, and it will automatically be installed:
+2. download the extension in chrome, and it will automatically be installed:
 http://www.stanford.edu/~huangty/netflix/netflix_chrome_ext.crx
 
 Ubuntu
 ======
 1. Same as MAC OS
-2. close all existing chrome instances, and run "/opt/google/chrome/google-chrome --enable-experimental-extension-apis"
+2. close all existing chrome instances, and run "/opt/google/chrome/google-chrome"
 3. Same as MAC OS
 4. Hope netflix has a linux client soon 
 
 Windows XP
 =======
 1. Same as MAC OS
-2. C:\Documents and Settings\devone\Local Settings\Application Data\Google\Chrome\Application\Chrome.exe --enable-experimental-extension-apis 
+2. C:\Documents and Settings\devone\Local Settings\Application Data\Google\Chrome\Application\Chrome.exe 
 3. Same as MAC OS
 

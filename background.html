@@ -15,6 +15,7 @@
 			function checkForNetflixUrl(tabId, changeInfo, tab) {
 				// If netflix.com is found in the tab's URL...
 				if (tab.url.indexOf("netflix.com/WiPlayer") > -1) {
+					//console.log("tab url: " + tab.url);
 					// show the netflix action on that tab.
 					chrome.pageAction.show(tabId);
 					var db = prepareDatabase();
@@ -23,8 +24,9 @@
 			};
 			function addListenerToNetflixTab(tabId, db, tabUrl){
 				//create data entry when request is sent
-				chrome.experimental.webRequest.onBeforeRequest.addListener(
+				chrome.webRequest.onBeforeRequest.addListener(
 					function(details){
+						//console.log("url: " + details.url);
 						if(details.url.indexOf("range") > -1){
 							//report the url and the token to the server
 							var xhr = new XMLHttpRequest();
@@ -42,19 +44,19 @@
 							});
 						}
 					},
-					{"tabId":tabId},
+					{"tabId":tabId, urls:["<all_urls>"]},
 					[]
 				);
 				//store data when response is completed
-				chrome.experimental.webRequest.onResponseStarted.addListener(
+				chrome.webRequest.onResponseStarted.addListener(
 					function(details){
-						console.log("response:"+details.url);
+						//console.log("response:"+details.url);
 						db.transaction(function (tx) {
 							tx.executeSql('UPDATE reqtable SET ip=?, responsetime=? WHERE reqid=?', [details.ip, details.timeStamp.toString(), details.requestId]);
 						});
-                    },
-                    {"tabId":tabId},
-                    []
+					},
+				        {"tabId":tabId, urls: ["<all_urls>"]},
+				        []
 				);
 			}
 			// Listen for any changes to the URL of any tab.

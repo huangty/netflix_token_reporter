@@ -10,7 +10,7 @@
 	"default_popup": "popup.html"
   },
   "permissions":  [
-	"experimental",
+    "webRequest",
     "notifications",
     "tabs",
     "http://*/*",
